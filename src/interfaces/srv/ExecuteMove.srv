@@ -1,0 +1,4 @@
+interfaces/Waypoint waypoint
+---
+bool success
+string msg
