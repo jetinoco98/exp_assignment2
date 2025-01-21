@@ -1,5 +1,6 @@
-string name
+bool start
+bool check
 ---
-int32 id
 bool success
 string msg
+int32 id

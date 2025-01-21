@@ -1,5 +1,5 @@
 string name
 ---
-interfaces/Waypoint waypoint
 bool success
 string msg
+interfaces/Waypoint waypoint

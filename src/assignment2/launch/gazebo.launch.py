@@ -30,7 +30,6 @@ def generate_launch_description():
         name='joint_state_publisher'
     )
    
-
     # GAZEBO_MODEL_PATH has to be correctly set for Gazebo to be able to find the model
     spawn_entity = Node(package='gazebo_ros', executable='spawn_entity.py',
                         arguments=['-entity', 'my_test_robot', '-topic', '/robot_description', '-x', '2.0', '-y', '2.0'],
@@ -38,18 +37,19 @@ def generate_launch_description():
 
     return LaunchDescription([
         DeclareLaunchArgument(name='model', default_value=default_model_path,
-                                    description='Absolute path to robot urdf file'),
+                              description='Absolute path to robot urdf file'),
         robot_state_publisher_node,
         joint_state_publisher_node,
         spawn_entity,
         ExecuteProcess(
             cmd=['gazebo', '--verbose', default_world_path, '-s', 'libgazebo_ros_factory.so'],
             output='screen'),
-        TimerAction(
-        	period=10.0,
-        	actions=[
-		ExecuteProcess(
-		    cmd=['rviz2', '-d', rviz_config_path],
-		    output='screen'),
-	])
     ])
+
+# FOR RVIZ, COPY THIS TO THE RETURN FUNCTION
+# TimerAction(
+#         	period=5.0,
+#         	actions=[
+# 		ExecuteProcess(
+# 		    cmd=['rviz2', '-d', rviz_config_path],
+# 		    output='screen'),])

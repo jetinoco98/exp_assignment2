@@ -14,6 +14,7 @@ if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
 endif()
 
 # DEPENDENCIES
+
 find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(rclcpp_action REQUIRED)
@@ -44,14 +45,13 @@ set(dependencies
 )
 
 # EXECUTABLES WITH DEPENDENCIES
+
 add_executable(move_action src/move_action.cpp)
 ament_target_dependencies(move_action ${dependencies})
 
 add_executable(inspect_action src/inspect_action.cpp)
 ament_target_dependencies(inspect_action ${dependencies})
 
-# add_executable(planner_controller src/planner_controller.cpp)
-# ament_target_dependencies(planner_controller ${dependencies})
 
 # INSTALL DIRECTORIES
 install(DIRECTORY launch pddl 
@@ -61,7 +61,6 @@ install(DIRECTORY launch pddl
 install(TARGETS
   move_action
   inspect_action
-  # planner_controller
   ARCHIVE DESTINATION lib
   LIBRARY DESTINATION lib
   RUNTIME DESTINATION lib/${PROJECT_NAME}

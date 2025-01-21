@@ -1,3 +1,6 @@
+bool start
+bool check
+bool cancel
 interfaces/Waypoint waypoint
 ---
 bool success

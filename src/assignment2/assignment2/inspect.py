@@ -42,26 +42,25 @@ class InspectionManager(Node):
             self.last_marker_id = msg.marker_ids[0]
 
     def inspection_callback(self, request, response):
-        self.get_logger().info(f'Received request to inspect waypoint [{request.name}]')
-
-        if request.name == "start_inspection":
+        if request.start:
             # Starts the robot rotation and removes any previously found marker
             self.start_rotation()
             response.success = True
-            response.msg = "Robot has began rotating to search for for markers."
+            response.msg = "Robot has began rotating to search for markers."
 
             # Remove any marker id that may have been found in the way to the waypoint.
             if self.last_marker_id:
                 self.last_marker_id = None
 
-        if request.name == "check_inspection":
-            # A non-blocking check for new markers
+        if request.check:
+            # An instant check for new markers
             if self.last_marker_id not in [None, 0]:
                 self.stop_rotation()
                 response.id = int(self.last_marker_id)
                 response.success = True
-                response.msg = f"Marker found on waypoint [{request.name}] with ID:{self.last_marker_id}"
+                response.msg = f"Marker found with ID:{self.last_marker_id}"
             else:
+                self.start_rotation()   
                 response.success = False
                 response.msg = "No markers detected yet. Waiting..."
 

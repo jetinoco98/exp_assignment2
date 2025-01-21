@@ -5,151 +5,171 @@
 #include "plansys2_executor/ActionExecutorClient.hpp"
 #include "rclcpp/rclcpp.hpp"
 #include "rclcpp_action/rclcpp_action.hpp"
-#include "interfaces/srv/get_waypoint_position.hpp" 
-#include "interfaces/msg/waypoint.hpp"   
 
-// Temporal: Used to teleport robot
-#include "gazebo_msgs/srv/set_entity_state.hpp"      
-#include "gazebo_msgs/msg/entity_state.hpp"         
-         
+#include "interfaces/msg/waypoint.hpp"  
+#include "interfaces/srv/execute_move.hpp"
+#include "interfaces/srv/get_waypoint_position.hpp"
 
 using namespace std::chrono_literals;
 
 class MoveAction : public plansys2::ActionExecutorClient
 {
 public:
-  MoveAction()
-  : plansys2::ActionExecutorClient("move", 250ms),
-    service_called_(false), waypoint_obtained_(false)
-  {
-    // Create service clients
-    get_waypoint_position_client_ = this->create_client<interfaces::srv::GetWaypointPosition>("get_waypoint_position");
-    set_entity_state_client_ = this->create_client<gazebo_msgs::srv::SetEntityState>("/set_entity_state");
+    MoveAction() : plansys2::ActionExecutorClient("move", 250ms), service_called_(false)
+    {
+        // Service creation
+        move_client_ = this->create_client<interfaces::srv::ExecuteMove>("execute_move");
+        get_waypoint_position_client_ = this->create_client<interfaces::srv::GetWaypointPosition>("get_waypoint_position");
 
-    // Wait for services to become available
-    while (!get_waypoint_position_client_->wait_for_service(1s)) {
-      RCLCPP_INFO(this->get_logger(), "Waiting for 'get_waypoint_position' service...");
+        // Wait for services to become available
+        while (!move_client_->wait_for_service(1s)) {
+            RCLCPP_INFO(this->get_logger(), "Waiting for 'execute_move' service...");
+        }
+        while (!get_waypoint_position_client_->wait_for_service(1s)) {
+            RCLCPP_INFO(this->get_logger(), "Waiting for 'get_waypoint_position' service...");
+        }
+        RCLCPP_INFO(this->get_logger(), "Services for Move Action are ready");
     }
-    while (!set_entity_state_client_->wait_for_service(1s)) {
-      RCLCPP_INFO(this->get_logger(), "Waiting for 'set_entity_state' service...");
-    }
-  }
 
 private:
-  void do_work() override
-  {
-      // Process the PDDL arguments
-      auto arguments = get_arguments();
-      if (arguments.size() < 3) {
-        finish(false, 0.0, "Invalid PDDL arguments");
-        return;
-      }
-      waypoint_final_name_ = arguments[2];  // (e.g. move robot1 w0 w1)
+    void do_work() override
+    {
+        // Process PDDL arguments
+        auto arguments = get_arguments();
+        if (arguments.size() < 3) {
+            finish(false, 0.0, "Invalid PDDL arguments");
+            return;
+        }
+        waypoint_name_ = arguments[2];  // (e.g. move robot1 w0 w1)
 
-      ///////////////////////////////////
-      // STEP 1: GET WAYPOINT POSITION
-      ///////////////////////////////////
+        ///////////////////////////////////////////////////////////
+        // STEP 1: GET THE WAYPOINT POSITION COORDINATES
+        ///////////////////////////////////////////////////////////
 
-      if (!service_called_) {
-        RCLCPP_INFO(this->get_logger(), "Starting Step 1: Sending request to get waypoint position...");
+        if (service_called_) {return;}  // Return to avoid repeated calls
 
-        // Service client: Get Waypoint Position
+        RCLCPP_INFO(this->get_logger(), "Step 1: Get the waypoint position.");
+        
+        // Service request
         auto request = std::make_shared<interfaces::srv::GetWaypointPosition::Request>();
-        request->name = waypoint_final_name_;
+        request->name = waypoint_name_;
 
         // Asynchronously send the request
-        auto future = get_waypoint_position_client_->async_send_request(
-          request,
-          [this](rclcpp::Client<interfaces::srv::GetWaypointPosition>::SharedFuture response) {
-            try {
-              auto result = response.get();
-              if (result->success) {
-                RCLCPP_INFO(this->get_logger(), "Waypoint position obtained successfully: %s", result->msg.c_str());
-                waypoint_ = result->waypoint;  // This is a waypoint object
-                waypoint_obtained_ = true;
-                // Proceed to Step 2
-                this->step_2();
-              } else {
-                RCLCPP_ERROR(this->get_logger(), "Failed to get waypoint position: %s", result->msg.c_str());
-                finish(false, 0.0, "Failed to get waypoint position");
-              }
-            } catch (const std::exception &e) {
-              RCLCPP_ERROR(this->get_logger(), "Service call threw an exception: %s", e.what());
-              finish(false, 0.0, "Failed to get waypoint position");
+        auto future = get_waypoint_position_client_->async_send_request(request,
+            [this](rclcpp::Client<interfaces::srv::GetWaypointPosition>::SharedFuture response) {
+                auto result = response.get();
+                if (result->success) {
+                    RCLCPP_INFO(this->get_logger(), "Waypoint position obtained successfully: %s", result->msg.c_str());
+                    waypoint_ = result->waypoint;
+                    this->step_2(); // Proceed to Step 2
+                } else {
+                    RCLCPP_ERROR(this->get_logger(), "Unable to obtain the waypoint position: %s", result->msg.c_str());
+                    finish(false, 0.0, "Get Waypoint Position failed");
+                }
             }
-          });
+        );
 
-        service_called_ = true; // Marking Step 1 as completed to avoid repeated calls
-      }
-  }
-
-  ///////////////////////////////////
-  // STEP 2: MOVE THE ROBOT
-  ///////////////////////////////////
-
-  void step_2()
-  {
-    if (!waypoint_obtained_) {
-      RCLCPP_ERROR(this->get_logger(), "Waypoint data is not available. Cannot proceed further.");
-      finish(false, 0.0, "Missing waypoint data");
-      return;
+        service_called_ = true; // Flag to avoid repeated calls
     }
 
-    RCLCPP_INFO(this->get_logger(), "Starting Step 2: Moving the robot'");
+    ///////////////////////////////////////////////////////////
+    // STEP 2: START THE NAVIGATION
+    ///////////////////////////////////////////////////////////
 
-    // Service client: Gazebo set entity state
-    auto state_request = std::make_shared<gazebo_msgs::srv::SetEntityState::Request>();
-    state_request->state.name = "my_test_robot";
-    state_request->state.pose.position.x = waypoint_.x; 
-    state_request->state.pose.position.y = waypoint_.y;  
-    state_request->state.pose.position.z = waypoint_.z; 
+    void step_2()
+    {
+        RCLCPP_INFO(this->get_logger(), "Step 2: Start the Navigation");
 
-    // Asynchronously send the request
-    auto future = set_entity_state_client_->async_send_request(
-      state_request,
-      [this](rclcpp::Client<gazebo_msgs::srv::SetEntityState>::SharedFuture response) {
-        try {
-          auto result = response.get();
-          if (result->success) {
-            finish(true, 1.0, "Move action completed");
-          } else {
-            finish(false, 0.0, "Failed to complete the move action");
-          }
-        } catch (const std::exception &e) {
-          RCLCPP_ERROR(this->get_logger(), "Service call threw an exception: %s", e.what());
-          finish(false, 0.0, "Error on Move Action service call");
-        }
-        reset(); // Reset state of variables after completion
-      });
-  }
+        // Service request
+        auto request = std::make_shared<interfaces::srv::ExecuteMove::Request>();
+        request->start = true;
+        request->waypoint = waypoint_;
 
-  void reset()
-  {
-    service_called_ = false;
-    waypoint_obtained_ = false;
-    waypoint_ = interfaces::msg::Waypoint();
-    waypoint_final_name_.clear();
-  }
+        // Asynchronously send the request
+        auto future = move_client_->async_send_request(request,
+            [this](rclcpp::Client<interfaces::srv::ExecuteMove>::SharedFuture response) {
+                auto result = response.get();
+                if (result->success) {
+                    RCLCPP_INFO(this->get_logger(), "Navigation has started successfully");
+                    this->step_3(); // Proceed to Step 3
+                } else {
+                    RCLCPP_ERROR(this->get_logger(), "Failed to start Navigation: %s", result->msg.c_str());
+                    finish(false, 0.0, "Failed to start Navigation");
+                }
+            }
+        );
+    }
 
-  rclcpp::Client<interfaces::srv::GetWaypointPosition>::SharedPtr get_waypoint_position_client_;
-  rclcpp::Client<gazebo_msgs::srv::SetEntityState>::SharedPtr set_entity_state_client_;
-  bool service_called_;
-  bool waypoint_obtained_;
-  interfaces::msg::Waypoint waypoint_;
-  std::string waypoint_final_name_;
+
+    ///////////////////////////////////////////////////////////
+    // STEP 3: WAIT FOR NAVIGATION COMPLETION
+    ///////////////////////////////////////////////////////////
+
+    void step_3()
+	{
+		RCLCPP_INFO(this->get_logger(), "Step 3: Wait for navigation completion");
+
+		// Continously ask the service, if the Navigation is completed
+        check_timer_ = this->create_wall_timer(
+            1s, // Wait between each check
+            [this]() {
+                // Service request
+                auto request = std::make_shared<interfaces::srv::ExecuteMove::Request>();
+                request->check = true;
+
+                // Asynchronously send the request
+                auto future = move_client_->async_send_request(
+                request,
+                [this](rclcpp::Client<interfaces::srv::ExecuteMove>::SharedFuture response) {
+                    auto result = response.get();
+                    if (result->success) {
+                        check_timer_->cancel();  // Stop the timer
+                        RCLCPP_INFO(this->get_logger(), "The navigation has completed successfully");
+                        finish(true, 1.0, "Navigation successful");
+                        reset(); // Reset state of variables after completion
+                    }
+                });
+            }
+        );
+	}
+
+    void reset()
+    {
+        // To restrict do_work()
+        service_called_ = false;
+        // Waypoint data
+        waypoint_ = interfaces::msg::Waypoint();
+        waypoint_name_.clear();
+        // Timers
+        check_timer_ = nullptr;
+    }
+
+    // Client variables
+    rclcpp::Client<interfaces::srv::ExecuteMove>::SharedPtr move_client_;
+    rclcpp::Client<interfaces::srv::GetWaypointPosition>::SharedPtr get_waypoint_position_client_;
+
+    // Flag variables
+    bool service_called_;
+
+    // Data variables
+    interfaces::msg::Waypoint waypoint_;
+    std::string waypoint_name_;
+
+    // Time variables
+    rclcpp::TimerBase::SharedPtr check_timer_;
 };
 
 int main(int argc, char **argv)
 {
-  rclcpp::init(argc, argv);
-  auto node = std::make_shared<MoveAction>();
+    rclcpp::init(argc, argv);
+    auto node = std::make_shared<MoveAction>();
 
-  node->set_parameter(rclcpp::Parameter("action_name", "move"));
-  node->trigger_transition(lifecycle_msgs::msg::Transition::TRANSITION_CONFIGURE);
+    node->set_parameter(rclcpp::Parameter("action_name", "move"));
+    node->trigger_transition(lifecycle_msgs::msg::Transition::TRANSITION_CONFIGURE);
 
-  rclcpp::spin(node->get_node_base_interface());
+    rclcpp::spin(node->get_node_base_interface());
 
-  rclcpp::shutdown();
-  return 0;
+    rclcpp::shutdown();
+    return 0;
 }
 
