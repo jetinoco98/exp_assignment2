@@ -90,3 +90,4 @@ killall gzclient
 ```
 
 - If any node encounters issues, terminate all processes using `Ctrl+C`, then relaunch or rerun the nodes in their respective terminals.
+- It is implied that the user knows how to source the `setup.bash` from ROS2-FOXY into the `.bashrc` adding `source /opt/ros/foxy/setup.bash`. Later on, he would also need to include the `setup.bash` from the newly built workspace, probably requiring to add `source /root/exp_assignment2/install/setup.bash`.
